@@ -80,27 +80,27 @@ def target(inputs: dict) -> dict:
                         try:
                             function_name = function_call.name
                             function_args = dict(function_call.args)
-                                
-                                # Ejecutar la función correspondiente
-                                if function_name == "calcular_precio":
-                                    result = calcular_precio(**function_args)
-                                elif function_name == "buscar_productos":
-                                    result = buscar_productos(**function_args)
-                                elif function_name == "sumar_precios":
-                                    result = sumar_precios(**function_args)
-                                elif function_name == "verificar_descuento":
-                                    result = verificar_descuento(**function_args)
-                                else:
-                                    result = f"Función {function_name} no implementada"
-                                
-                                messages.append({
-                                    "role": "tool",
-                                    "name": function_name,
-                                    "content": result
-                                })
 
-                                print(f"Procesada llamada a función: {function_name}")
-                                print(f"Resultado: {result}")
+                            # Ejecutar la función correspondiente
+                            if function_name == "calcular_precio":
+                                result = calcular_precio(**function_args)
+                            elif function_name == "buscar_productos":
+                                result = buscar_productos(**function_args)
+                            elif function_name == "sumar_precios":
+                                result = sumar_precios(**function_args)
+                            elif function_name == "verificar_descuento":
+                                result = verificar_descuento(**function_args)
+                            else:
+                                result = f"Función {function_name} no implementada"
+
+                            messages.append({
+                                "role": "tool",
+                                "name": function_name,
+                                "content": result
+                            })
+
+                            print(f"Procesada llamada a función: {function_name}")
+                            print(f"Resultado: {result}")
                         except Exception as e:
                             print(f"Error procesando función {function_name}: {str(e)}")
                             messages.append({
@@ -126,7 +126,7 @@ def kindness(outputs: dict, reference_outputs: dict) -> dict:
 
     system_instruction = """
                 Evaluar la respuesta del agente:
-
+c
                 ¿El agente fue amable al responder en la vida real? Independientemente de si encontró o no el producto, o del costo del producto.
 
                 - True: Si fue amable
