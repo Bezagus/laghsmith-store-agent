@@ -1,7 +1,9 @@
-from langsmith import Client, wrappers
+from langsmith import Client, traceable
+from google import genai
+from google.genai import types
 import json
 from pipeline import initialize_messages, tools
-import openai
+from gemini_utils import convert_to_gemini_content, extract_system_instruction
 from dotenv import load_dotenv
 import os
 from uuid import uuid4
@@ -14,8 +16,8 @@ load_dotenv()
 # Configurar el cliente de LangSmith
 langsmith_client = Client()
 
-# Configurar el cliente de OpenAI con LangSmith
-openai_client = wrappers.wrap_openai(openai.Client(api_key=os.getenv("OPENAI_API_KEY")))
+# Configurar el cliente de Gemini
+gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # Dataset de pruebas
 examples = [
@@ -114,6 +116,7 @@ def trajectory_subsequence(outputs: dict, reference_outputs: dict) -> float:
 
 
 # Función que ejecuta el agente y registra la trayectoria junto con la respuesta final.
+@traceable
 def run_agent_with_tracking(inputs: dict) -> dict:
     """Ejecuta el agente y registra la trayectoria junto con la respuesta final."""
     trajectory = []
@@ -133,33 +136,52 @@ def run_agent_with_tracking(inputs: dict) -> dict:
     try:
         # Ejecutar el agente
         while True:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                tools=tools  # Usar las mismas herramientas que pipeline.py
+            # Preparar la llamada a Gemini
+            system_instruction = extract_system_instruction(messages)
+            contents = convert_to_gemini_content([m for m in messages if m["role"] != "system"])
+
+            config = types.GenerateContentConfig(
+                tools=[tools],
+                system_instruction=system_instruction
             )
-            
-            assistant_message = response.choices[0].message
-            
+
+            response = gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=config
+            )
+
+            # Parsear respuesta de Gemini
+            candidate = response.candidates[0]
+            parts = candidate.content.parts
+
+            text_response = None
+            function_calls = []
+
+            for part in parts:
+                if part.text:
+                    text_response = part.text
+                elif part.function_call:
+                    function_calls.append(part.function_call)
+
             # Si hay una respuesta final del agente
-            if assistant_message.content:
-                final_response = assistant_message.content
+            if text_response:
+                final_response = text_response
                 messages.append({"role": "assistant", "content": final_response})
                 break
-                
+
             # Si el agente quiere usar funciones
-            if assistant_message.tool_calls:
+            if function_calls:
                 messages.append({
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": assistant_message.tool_calls
+                    "function_calls": function_calls
                 })
-                
+
                 # Procesar cada llamada a función
-                for tool_call in assistant_message.tool_calls:
-                    if tool_call.type == "function":
-                        function_name = tool_call.function.name
-                        function_args = json.loads(tool_call.function.arguments)
+                for function_call in function_calls:
+                    function_name = function_call.name
+                    function_args = dict(function_call.args)
                         
                         # Registrar la función llamada en la trayectoria
                         trajectory.append(function_name)
@@ -177,7 +199,7 @@ def run_agent_with_tracking(inputs: dict) -> dict:
                         # Agregar el resultado a los mensajes
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "name": function_name,
                             "content": result
                         })
                         

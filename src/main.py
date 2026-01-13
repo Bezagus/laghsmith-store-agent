@@ -1,8 +1,7 @@
 import os
-import openai
+from google import genai
 from dotenv import load_dotenv
 from pipeline import run_agent
-from langsmith.wrappers import wrap_openai
 
 def main():
     """
@@ -10,12 +9,12 @@ def main():
     """
     # Cargar variables de entorno necesarias para el agente
     load_dotenv()
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("Falta la variable de entorno OPENAI_API_KEY.")
-    
-    # Configurar el cliente de OpenAI
-    client = wrap_openai(openai.Client(api_key=openai_api_key))
+    google_api_key = os.getenv("GOOGLE_API_KEY")
+    if not google_api_key:
+        raise ValueError("Falta la variable de entorno GOOGLE_API_KEY.")
+
+    # Configurar el cliente de Gemini
+    client = genai.Client(api_key=google_api_key)
     
     print("\n🏪 Bienvenido a Platzi Store! 🛍️")
     print("Escribe 'salir' en cualquier momento para terminar la conversación.\n")

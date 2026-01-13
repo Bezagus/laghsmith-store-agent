@@ -1,6 +1,8 @@
-from openai import OpenAI
-from langsmith import Client
+from google import genai
+from google.genai import types
+from langsmith import Client, traceable
 from pipeline import initialize_messages, tools
+from gemini_utils import convert_to_gemini_content, extract_system_instruction
 from agent_tools import (
     calcular_precio,
     buscar_productos,
@@ -12,10 +14,11 @@ import json
 
 load_dotenv()
 
-openai_client = OpenAI()
+gemini_client = genai.Client()
 client = Client()
 
 # Función objetivo que simula el comportamiento del agente en la vida real.
+@traceable
 def target(inputs: dict) -> dict:
     try:
         print("\n=== TARGET FUNCTION ===")
@@ -33,31 +36,50 @@ def target(inputs: dict) -> dict:
         
         while True:
             try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=messages,
-                    tools=tools
+                # Preparar la llamada a Gemini
+                system_instruction = extract_system_instruction(messages)
+                contents = convert_to_gemini_content([m for m in messages if m["role"] != "system"])
+
+                config = types.GenerateContentConfig(
+                    tools=[tools],
+                    system_instruction=system_instruction
                 )
-                
-                assistant_message = response.choices[0].message
-                
-                if assistant_message.content:
-                    result = {"output": assistant_message.content}
+
+                response = gemini_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=contents,
+                    config=config
+                )
+
+                # Parsear respuesta de Gemini
+                candidate = response.candidates[0]
+                parts = candidate.content.parts
+
+                text_response = None
+                function_calls = []
+
+                for part in parts:
+                    if part.text:
+                        text_response = part.text
+                    elif part.function_call:
+                        function_calls.append(part.function_call)
+
+                if text_response:
+                    result = {"output": text_response}
                     print(f"Respuesta del agente: {result}")
                     return result
-                
-                if assistant_message.tool_calls:
+
+                if function_calls:
                     messages.append({
                         "role": "assistant",
                         "content": None,
-                        "tool_calls": assistant_message.tool_calls
+                        "function_calls": function_calls
                     })
-                    
-                    for tool_call in assistant_message.tool_calls:
+
+                    for function_call in function_calls:
                         try:
-                            if tool_call.type == "function":
-                                function_name = tool_call.function.name
-                                function_args = json.loads(tool_call.function.arguments)
+                            function_name = function_call.name
+                            function_args = dict(function_call.args)
                                 
                                 # Ejecutar la función correspondiente
                                 if function_name == "calcular_precio":
@@ -73,22 +95,22 @@ def target(inputs: dict) -> dict:
                                 
                                 messages.append({
                                     "role": "tool",
-                                    "tool_call_id": tool_call.id,
+                                    "name": function_name,
                                     "content": result
                                 })
-                                
+
                                 print(f"Procesada llamada a función: {function_name}")
                                 print(f"Resultado: {result}")
                         except Exception as e:
                             print(f"Error procesando función {function_name}: {str(e)}")
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tool_call.id,
+                                "name": function_name,
                                 "content": f"Error: {str(e)}"
                             })
-                
+
             except Exception as e:
-                print(f"Error en llamada a OpenAI: {str(e)}")
+                print(f"Error en llamada a Gemini: {str(e)}")
                 return {"output": f"Error: {str(e)}"}
                 
     except Exception as e:
@@ -102,12 +124,7 @@ def kindness(outputs: dict, reference_outputs: dict) -> dict:
     expected = reference_outputs.get("answer", "") if isinstance(reference_outputs, dict) else reference_outputs
     response_text = outputs.get("output", "") if isinstance(outputs, dict) else outputs
 
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": """
+    system_instruction = """
                 Evaluar la respuesta del agente:
 
                 ¿El agente fue amable al responder en la vida real? Independientemente de si encontró o no el producto, o del costo del producto.
@@ -117,21 +134,26 @@ def kindness(outputs: dict, reference_outputs: dict) -> dict:
 
                 Algunos factores que puedes tomar en cuenta y no son excluyentes son: efusividad, voluntad de ayudar y de presentar el producto con buenas referencias
                 """
-            },
-            {
-                "role": "user",
-                "content": f"""
+
+    user_content = f"""
                     Pregunta del cliente fue: {question}
                     La respuesta de referencia esperada fue: {expected}
                     La respuesta real del agente fue: {response_text}
                 """
-            }
-        ],
+
+    config = types.GenerateContentConfig(
+        system_instruction=system_instruction
+    )
+
+    response = gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=user_content,
+        config=config
     )
 
     result = {
         "key": "kindness",
-        "score": response.choices[0].message.content.strip().lower() == "true"
+        "score": response.candidates[0].content.parts[0].text.strip().lower() == "true"
     }
 
     return result
