@@ -1,4 +1,5 @@
 from langsmith import Client, traceable
+from langsmith.schemas import Run, Example
 from google import genai
 from google.genai import types
 import json
@@ -102,17 +103,23 @@ langsmith_client.create_examples(
 )
 
 # Evaluador de trayectoria que verifica si la trayectoria del agente coincide con la trayectoria esperada.
-def trajectory_subsequence(outputs: dict, reference_outputs: dict) -> float:
-    expected_pairs = len(reference_outputs["trajectory"]) // 2
+def trajectory_subsequence(run: Run, example: Example) -> dict:
+    expected_trajectory = example.outputs.get("trajectory", []) if example.outputs else []
+    agent_trajectory = run.outputs.get("trajectory", []) if run.outputs else []
 
-    agent_searches = outputs["trajectory"].count("buscar_productos")
-    agent_verifications = outputs["trajectory"].count("verificar_descuento")
+    expected_pairs = len(expected_trajectory) // 2
+
+    agent_searches = agent_trajectory.count("buscar_productos")
+    agent_verifications = agent_trajectory.count("verificar_descuento")
 
     complete_pairs = min(agent_searches, agent_verifications)
 
-    score = complete_pairs / expected_pairs
+    score = complete_pairs / expected_pairs if expected_pairs > 0 else 0.0
 
-    return score
+    return {
+        "key": "trajectory_subsequence",
+        "score": score
+    }
 
 
 # Función que ejecuta el agente y registra la trayectoria junto con la respuesta final.
@@ -182,26 +189,26 @@ def run_agent_with_tracking(inputs: dict) -> dict:
                 for function_call in function_calls:
                     function_name = function_call.name
                     function_args = dict(function_call.args)
-                        
-                        # Registrar la función llamada en la trayectoria
-                        trajectory.append(function_name)
-                        
-                        # Ejecutar la función correspondiente
-                        if function_name == "buscar_productos":
-                            result = buscar_productos(
-                                search_term=function_args["search_term"]
-                            )
-                        elif function_name == "verificar_descuento":
-                            result = verificar_descuento(
-                                product_id=function_args["product_id"]
-                            )
-                        
-                        # Agregar el resultado a los mensajes
-                        messages.append({
-                            "role": "tool",
-                            "name": function_name,
-                            "content": result
-                        })
+
+                    # Registrar la función llamada en la trayectoria
+                    trajectory.append(function_name)
+
+                    # Ejecutar la función correspondiente
+                    if function_name == "buscar_productos":
+                        result = buscar_productos(
+                            search_term=function_args["search_term"]
+                        )
+                    elif function_name == "verificar_descuento":
+                        result = verificar_descuento(
+                            product_id=function_args["product_id"]
+                        )
+
+                    # Agregar el resultado a los mensajes
+                    messages.append({
+                        "role": "tool",
+                        "name": function_name,
+                        "content": result
+                    })
                         
         # Finalizar el árbol de ejecución
         evaluation_trace.end(

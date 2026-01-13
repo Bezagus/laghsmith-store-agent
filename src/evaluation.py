@@ -1,6 +1,7 @@
 from google import genai
 from google.genai import types
 from langsmith import Client, traceable
+from langsmith.schemas import Run, Example
 from pipeline import initialize_messages, tools
 from gemini_utils import convert_to_gemini_content, extract_system_instruction
 from agent_tools import (
@@ -119,14 +120,15 @@ def target(inputs: dict) -> dict:
 
 
 # Evaluador de amabilidad donde se evalúa si el agente fue amable al responder en la vida real.
-def kindness(outputs: dict, reference_outputs: dict) -> dict:
-    question = reference_outputs.get("question", "") if isinstance(reference_outputs, dict) else reference_outputs
-    expected = reference_outputs.get("answer", "") if isinstance(reference_outputs, dict) else reference_outputs
-    response_text = outputs.get("output", "") if isinstance(outputs, dict) else outputs
+def kindness(run: Run, example: Example) -> dict:
+    # Extraer datos del run y example
+    response_text = run.outputs.get("output", "") if run.outputs else ""
+    question = example.inputs.get("question", "") if example.inputs else ""
+    expected = example.outputs.get("answer", "") if example.outputs else ""
 
     system_instruction = """
                 Evaluar la respuesta del agente:
-c
+
                 ¿El agente fue amable al responder en la vida real? Independientemente de si encontró o no el producto, o del costo del producto.
 
                 - True: Si fue amable
@@ -160,14 +162,14 @@ c
 
 
 # Evaluador de emojis donde se evalúa si el agente coloca emojis en su respuesta.
-def contains_emoji(outputs: dict, reference_outputs: dict) -> dict:
+def contains_emoji(run: Run, example: Example) -> dict:
     common_emojis = [
         "😊", "❤️", "👍", "😂", "🙌", "✨", "🎉", "🔥", "💪", "👏",
         "🌟", "💯", "🤔", "👀", "💜", "✅", "🎈", "🌈", "🙏", "⭐",
         "💻", "📱", "🖥️", "⌨️", "🖱️", "💾", "📦", "🛒", "🛍️", "🔋",
         "🧑‍💻", "📡", "📊", "📈", "🖋️", "🖇️", "🏷️", "💳", "💡", "🔧"
     ]
-    response_text = outputs.get("output", "")
+    response_text = run.outputs.get("output", "") if run.outputs else ""
     has_emoji = any(emoji in response_text for emoji in common_emojis)
     result = {
         "key": "contains_emoji",
